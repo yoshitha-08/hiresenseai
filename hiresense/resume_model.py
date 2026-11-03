@@ -208,6 +208,8 @@ def move_item(data: dict, section: str, item_id: str, direction: int) -> dict:
 
 # ---------- skills and links (structured items) ----------
 
+PROGRAMMING_LANGUAGES = {"c", "c++", "c#", "java", "python", "javascript", "typescript", "go", "rust", "kotlin",
+                        "swift", "ruby", "php", "r", "matlab", "scala", "dart", "perl", "bash", "sql"}
 SOFT_SKILL_NAMES = {"communication", "teamwork", "leadership", "problem solving"}
 SOFT_CATEGORY = "Soft Skills"
 MAX_GROUP_CHARS = 105  # roughly one printed line of skills
@@ -251,6 +253,10 @@ def skill_category_for(data: dict, name: str) -> str:
     groups = _technical_groups(data)
     if not groups:
         return "Technical Skills"
+    if name.strip().lower() in PROGRAMMING_LANGUAGES:
+        for category in groups:
+            if re.search(r"programming|language", category, re.IGNORECASE):
+                return category
     needed = len(name) + 2
     for category in reversed(groups):
         if _make_room(data, category, needed):
