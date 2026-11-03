@@ -80,12 +80,12 @@ def _items(data: dict, section: str) -> list[str]:
 
 def build_latex(data: dict) -> str:
     personal = data.get("personal", {})
-    contact = [personal.get(k) for k in ("email", "phone", "location") if personal.get(k)]
-    contact += [f"{link.get('label', '')}: {link.get('url', '')}".strip(": ") for link in data.get("links", [])
-                if link.get("url") or link.get("label")]
+    contact = [escape(personal.get(k)) for k in ("email", "phone", "location") if personal.get(k)]
+    contact += [f"\\href{{{link['url']}}}{{{escape(link.get('label') or link['url'])}}}"
+                for link in data.get("links", []) if link.get("url")]
     parts = [PREAMBLE, "\\begin{document}", "\\begin{center}",
              f"  {{\\LARGE\\scshape {escape(personal.get('name'))}}}\\\\[4pt]",
-             f"  \\small {escape(' | '.join(contact))}" if contact else "",
+             f"  \\small {' | '.join(contact)}" if contact else "",
              "\\end{center}"]
 
     sections = [

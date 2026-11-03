@@ -409,10 +409,45 @@ def _parse_links(lines):
     return links
 
 
+HEADER_LINK_LABELS = ("GitHub", "LeetCode", "LinkedIn", "Portfolio", "Website")
+
+
+def _header_links(data: bytes) -> list[dict]:
+    """Links in the top of a PDF (GitHub, LeetCode, LinkedIn), with their web addresses from the PDF itself."""
+    import pymupdf
+
+    links = []
+    try:
+        document = pymupdf.open(stream=data, filetype="pdf")
+    except Exception:
+        return links
+    try:
+        page = document[0]
+        for link in page.get_links():
+            uri = link.get("uri") or ""
+            area = pymupdf.Rect(link["from"])
+            if area.y0 > page.rect.height * 0.2 or not uri.startswith(("http", "https")):
+                continue
+            label = " ".join(word[4] for word in page.get_text("words") if pymupdf.Rect(word[:4]).intersects(area))
+            label = label.strip(" |")
+            if label:
+                links.append({"id": new_id(), "label": label, "url": uri})
+    finally:
+        document.close()
+    return links
+
+
 def parse_upload(filename: str, data: bytes) -> dict:
     """Full pipeline for an uploaded resume: validate, extract text, parse, keep the original text."""
     file_type = validate_upload(filename, data)
     text = extract_document_text(filename, data)
     resume = parse_resume_text(text)
     resume["source_file_type"] = file_type
+    if file_type == "pdf":
+        header_links = _header_links(data)
+        if header_links:
+            resume["links"] = header_links
+            # The icon text in the header is replaced by the real links, so it is not shown twice.
+            resume["unclassified"] = [item for item in resume.get("unclassified", [])
+                                      if not any(label in item.get("text", "") for label in HEADER_LINK_LABELS)]
     return resume
