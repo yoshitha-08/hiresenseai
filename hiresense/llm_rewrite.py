@@ -96,3 +96,36 @@ def rewrite_bullet(original: str, jd_terms: list[str], jd_text: str, requirement
     except (ValueError, AttributeError):
         return None
     return rewrite if passes_checks(original, rewrite, jd_text) else None
+
+
+SKILL_PROMPT = """Read this job description and list the TECHNICAL skills, tools, languages, or subjects it asks for.
+Ignore soft skills such as teamwork, communication or leadership. Use the exact wording from the job description.
+
+Job description:
+{jd_text}
+
+Reply with JSON only: {{"skills": ["...", "..."]}}"""
+
+
+def suggest_skills(jd_text: str, existing: set[str], model: str = config.LLM_MODEL, ask=None) -> list[str]:
+    """Technical skills the job description asks for that the resume does not have. Only names found in the JD."""
+    if not model or not jd_text.strip():
+        return []
+    ask = ask or (lambda prompt, name: ask_gemini(prompt, name, config.GEMINI_API_KEY))
+    reply = ask(SKILL_PROMPT.format(jd_text=jd_text[:6000]), model)
+    if not reply:
+        return []
+    try:
+        names = json.loads(reply).get("skills", [])
+    except (ValueError, AttributeError):
+        return []
+    lowered_jd = jd_text.lower()
+    lowered_existing = {name.lower() for name in existing}
+    result = []
+    for name in names:
+        name = str(name).strip()
+        if not name or name.lower() in lowered_existing or name.lower() not in lowered_jd:
+            continue
+        if name not in result:
+            result.append(name)
+    return result[:15]

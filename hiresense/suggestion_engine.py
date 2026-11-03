@@ -8,7 +8,7 @@ import hashlib
 import re
 
 from . import config
-from .llm_rewrite import is_available, rewrite_bullet
+from .llm_rewrite import is_available, rewrite_bullet, suggest_skills
 from .resume_model import ENTRY_SECTIONS, SECTION_TITLES, sections_text
 from .jd_parser import SOFT_SKILLS
 from .skills import find_skills
@@ -52,6 +52,17 @@ def generate_suggestions(resume_data: dict, requirements: dict | None = None) ->
             issue=f"{level.capitalize()} skill '{term}' is in the job description but not in your resume",
             explanation=f"Add {term} to your Skills section only if you know it.",
         ))
+    if config.LLM_MODEL and is_available():
+        existing = {skill["name"] for skill in resume_data.get("skills", [])}
+        already = {s["proposed"] for s in suggestions}
+        for name in suggest_skills(requirements.get("text", ""), existing | already):
+            suggestions.append(_make(
+                "keyword_gap", {"section": "skills", "entry_id": None, "item_id": None, "field": "name"},
+                "", name,
+                issue=f"Skill '{name}' is in the job description but not in your resume",
+                explanation=f"Add {name} to your Skills section only if you know it.",
+            ))
+        suggestions.extend(_llm_bullet_suggestions(resume_data, requirements))
     return suggestions
 
 
