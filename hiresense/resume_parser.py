@@ -35,7 +35,9 @@ SECTION_ALIASES = {
     "skills": ["skills", "technical skills", "core competencies", "competencies", "technologies", "tools"],
     "projects": ["projects", "academic projects", "personal projects", "key projects"],
     "certifications": ["certifications", "certificates", "licenses", "licenses and certifications", "courses"],
-    "achievements": ["achievements", "awards", "honors", "honours", "accomplishments", "awards and achievements"],
+    "achievements": ["achievements", "awards", "honors", "honours", "accomplishments", "awards and achievements",
+                     "leadership & responsibilities", "leadership and responsibilities", "leadership",
+                     "responsibilities", "positions of responsibility", "extracurricular activities"],
     "interests": ["interests", "hobbies", "hobbies and interests", "activities"],
     "links": ["links", "profiles", "online profiles", "professional links", "social links"],
 }
@@ -82,7 +84,7 @@ def _extract_pdf(data: bytes) -> str:
     try:
         if document.needs_pass:
             raise ResumeParseError("The PDF is password-protected. Remove the password and try again.")
-        pages = [page.get_text("text") for page in document]
+        pages = [_page_lines(page) for page in document]
     finally:
         document.close()
     text = "\n".join(pages).strip()
@@ -91,6 +93,27 @@ def _extract_pdf(data: bytes) -> str:
             "This PDF has no extractable text. It may be a scanned image, and OCR is needed before it can be read."
         )
     return text
+
+
+def _page_lines(page) -> str:
+    """Rebuild visual lines from word positions, so a right-aligned date stays on its heading line.
+
+    A large horizontal gap inside a line is written as " | ", which the entry parser already treats as a separator.
+    """
+    rows: dict[float, list] = {}
+    for x0, y0, x1, y1, word, *_ in page.get_text("words"):
+        key = round((y0 + y1) / 2 / 3)  # words on the same visual line share a band
+        rows.setdefault(key, []).append((x0, x1, word))
+    lines = []
+    for key in sorted(rows):
+        words = sorted(rows[key])
+        parts = [words[0][2]]
+        for previous, current in zip(words, words[1:]):
+            gap = current[0] - previous[1]
+            parts.append(" | " if gap > 40 else " ")
+            parts.append(current[2])
+        lines.append("".join(parts))
+    return "\n".join(lines)
 
 
 def _extract_docx(data: bytes) -> str:
@@ -162,7 +185,10 @@ def parse_resume_text(text: str) -> dict:
 
     for section in ENTRY_SECTIONS:
         if section in buckets:
-            data[section] = _parse_entries(buckets.pop(section))
+            if section == "education":
+                data[section] = _parse_education(buckets.pop(section))
+            else:
+                data[section] = _parse_entries(buckets.pop(section))
     if "skills" in buckets:
         data["skills"] = _parse_skills(buckets.pop("skills"))
     if "links" in buckets:
@@ -234,6 +260,42 @@ def _looks_like_name(text: str) -> bool:
     return 1 <= len(words) <= 4 and not any(ch.isdigit() for ch in text) and "@" not in text
 
 
+GRADE_RE = re.compile(r"\b(CGPA|GPA|Percentage|Grade|Marks)\s*:?\s*[^|]*", re.IGNORECASE)
+
+
+def _parse_education(lines):
+    """Education is two lines per school: school (with dates) first, then degree and field (with grade)."""
+    entries = []
+    current = None
+    for line in lines:
+        text = _strip_bullet(line)
+        if current is None or (current["organization"] and current["title"]):
+            current = _new_entry()
+            entries.append(current)
+            date_match = DATE_RE.search(text)
+            if date_match:
+                current["dates"] = date_match.group(0).strip()
+                text = (text[:date_match.start()] + text[date_match.end():]).strip(" |,-–—")
+            current["organization"] = text.replace(" | ", " ").strip()
+            continue
+        grade = GRADE_RE.search(text)
+        if grade:
+            current["grade"] = grade.group(0).strip(" |,")
+            text = (text[:grade.start()] + text[grade.end():]).strip(" |,-–—")
+        text = text.replace(" | ", " ").strip()
+        parts = re.split(r"\s+[–-]\s+", text, maxsplit=1)
+        degree = parts[0]
+        field = parts[1] if len(parts) > 1 else ""
+        current["title"] = degree.strip()
+        current["field_of_study"] = field.strip()
+    for entry in entries:
+        entry.setdefault("bullets", [])
+    return entries
+
+
+TITLE_WITH_LINK_RE = re.compile(r"\s*\|\s*(GitHub|Live Demo|Demo|Link)\s*$", re.IGNORECASE)
+
+
 def _parse_entries(lines):
     entries = []
     current = None
@@ -241,6 +303,13 @@ def _parse_entries(lines):
     for line in lines:
         is_bullet = bool(BULLET_RE.match(line))
         text = _strip_bullet(line)
+        if is_bullet and current is not None and TITLE_WITH_LINK_RE.search(text):
+            # A bulleted heading such as "Project name | GitHub" starts a new entry, not a bullet.
+            current = _new_entry()
+            entries.append(current)
+            _apply_title(current, re.sub(TITLE_WITH_LINK_RE, "", text).strip(" |"))
+            previous_was_bullet = False
+            continue
         if is_bullet:
             if current is None:
                 current = _new_entry()
@@ -257,6 +326,10 @@ def _parse_entries(lines):
             # Second line of an entry header, usually organization and dates.
             _apply_subheader(current, text)
             current["_meta_done"] = True
+            continue
+        if current is not None and re.match(r"tech\s+stack\s*:", text, re.IGNORECASE):
+            current["bullets"].append({"id": new_id(), "text": text})  # belongs to the project above it
+            previous_was_bullet = False
             continue
         current = _new_entry()
         entries.append(current)
@@ -289,11 +362,28 @@ def _apply_subheader(entry, text):
     entry["organization"] = text
 
 
+def _join_wrapped_lines(lines):
+    """Join a line that continues the previous one: a hyphenated word split across lines, or a parenthesis
+    or lowercase fragment that wrapped to the next line."""
+    joined = []
+    for line in lines:
+        body = _strip_bullet(line)
+        if joined:
+            previous = joined[-1]
+            if previous.endswith("-") and body[:1].islower():
+                joined[-1] = previous[:-1] + body
+                continue
+            if body[:1] in "(" or (body[:1].islower() and not previous.rstrip().endswith((".", ":"))):
+                joined[-1] = f"{previous} {body}"
+                continue
+        joined.append(body)
+    return joined
+
+
 def _parse_skills(lines):
     skills = []
-    for line in lines:
+    for body in _join_wrapped_lines(lines):
         category = ""
-        body = _strip_bullet(line)
         if ":" in body:
             label, rest = body.split(":", 1)
             if 0 < len(label) <= 40 and rest.strip():

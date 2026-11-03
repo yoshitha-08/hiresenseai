@@ -5,6 +5,7 @@ reorders, additions and deletions.
 """
 
 import copy
+import re
 import uuid
 
 MAX_FIELD_LENGTH = 10000  # long bullets come from PDFs that lose line breaks
@@ -205,6 +206,56 @@ def move_item(data: dict, section: str, item_id: str, direction: int) -> dict:
 
 
 # ---------- skills and links (structured items) ----------
+
+SOFT_SKILL_NAMES = {"communication", "teamwork", "leadership", "problem solving"}
+SOFT_CATEGORY = "Soft Skills"
+MAX_GROUP_CHARS = 105  # roughly one printed line of skills
+SHORT_FORM = re.compile(r"^(.*\S)\s*\(([A-Za-z][A-Za-z0-9+#.-]{0,9})\)$")
+
+
+def _technical_groups(data: dict) -> list[str]:
+    groups = []
+    for skill in data.get("skills", []):
+        category = skill.get("category", "")
+        if category and category != SOFT_CATEGORY and category not in groups:
+            groups.append(category)
+    return groups
+
+
+def _group_text(data: dict, category: str) -> str:
+    return ", ".join(skill["name"] for skill in data.get("skills", []) if skill.get("category", "") == category)
+
+
+def _make_room(data: dict, category: str, needed: int) -> bool:
+    """Shorten names that have an abbreviation in brackets, such as 'Natural Language Processing (NLP)' -> 'NLP'."""
+    for skill in data.get("skills", []):
+        if skill.get("category", "") != category:
+            continue
+        match = SHORT_FORM.match(skill["name"].strip())
+        if match:
+            skill["name"] = match.group(2)
+            if len(_group_text(data, category)) + needed <= MAX_GROUP_CHARS:
+                return True
+    return len(_group_text(data, category)) + needed <= MAX_GROUP_CHARS
+
+
+def skill_category_for(data: dict, name: str) -> str:
+    """Where a new skill goes, making room first by shortening names in that group.
+
+    Soft skills go to Soft Skills. A technical skill goes to the last technical group that has room, after its long
+    names are shortened. If no group has room, it still goes to the last technical group.
+    """
+    if name.strip().lower() in SOFT_SKILL_NAMES:
+        return SOFT_CATEGORY
+    groups = _technical_groups(data)
+    if not groups:
+        return "Technical Skills"
+    needed = len(name) + 2
+    for category in reversed(groups):
+        if _make_room(data, category, needed):
+            return category
+    return groups[-1]
+
 
 def add_skill(data: dict, name: str, category: str = "") -> str:
     skill_id = new_id()

@@ -5,6 +5,7 @@ import re
 from .resume_parser import extract_document_text
 from .skills import extract_keywords, find_skills
 
+SOFT_SKILLS = {"Communication", "Teamwork", "Leadership", "Problem Solving"}
 PREFERRED_HINTS = ("preferred", "nice to have", "good to have", "bonus", "desirable", "plus", "optional")
 REQUIRED_HINTS = ("required", "must have", "must-have", "requirements", "essential", "qualifications", "minimum")
 
@@ -52,6 +53,7 @@ def extract_requirements(jd_text: str) -> dict:
     keywords: frequent non-skill words in the JD.
     """
     required, preferred = set(), set()
+    requirement_lines = []
     mode = "required"
     for line in jd_text.splitlines():
         lowered = line.strip().lower()
@@ -61,11 +63,13 @@ def extract_requirements(jd_text: str) -> dict:
             mode = "preferred"
         elif any(hint in lowered for hint in REQUIRED_HINTS) and len(lowered) <= 80:
             mode = "required"
-        found = find_skills(line)
+        found = find_skills(line) - SOFT_SKILLS
         if mode == "preferred":
             preferred |= found
         else:
             required |= found
+        if found and len(requirement_lines) < 20:
+            requirement_lines.append(line.strip())
     preferred -= required
 
     lowered_jd = jd_text.lower()
@@ -81,4 +85,6 @@ def extract_requirements(jd_text: str) -> dict:
         "qualifications": qualifications,
         "years": years,
         "keywords": keywords,
+        "text": jd_text,
+        "requirement_lines": requirement_lines,
     }

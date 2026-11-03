@@ -16,6 +16,8 @@ import streamlit as st
 from hiresense import db
 from hiresense import resume_model as rm
 from hiresense.document_edit import apply_to_file, docx_preview_lines, docx_to_pdf, render_pdf_pages
+from hiresense.generators import build_docx, build_pdf
+from hiresense.latex_build import LatexUnavailable, build_latex_pdf
 from hiresense.matching_engine import analyze_match, compare_results
 from hiresense.suggestion_engine import apply_suggestion, generate_suggestions
 
@@ -170,7 +172,7 @@ def _add_text_from(section: str, input_key: str, kind: str) -> None:
         return
     try:
         if kind == "skill":
-            rm.add_skill(_data(), text)
+            rm.add_skill(_data(), text, rm.skill_category_for(_data(), text))
         elif kind == "link":
             rm.add_link(_data(), "GitHub", text)
         else:
@@ -490,6 +492,24 @@ def _edited_document(data: dict):
     return result
 
 
+def _template_pdf(data: dict):
+    """The resume built from the LaTeX template, or None when LaTeX is not installed or the build fails.
+
+    Cached by the resume data, because a LaTeX build takes a few seconds.
+    """
+    key = hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    cached = st.session_state.get("_template_cache")
+    if cached and cached[0] == key:
+        return cached[1]
+    try:
+        pdf = build_latex_pdf(data)
+    except LatexUnavailable as exc:
+        st.session_state["_template_note"] = str(exc)
+        pdf = None
+    st.session_state["_template_cache"] = (key, pdf)
+    return pdf
+
+
 def _render_preview(data: dict) -> None:
     """The uploaded file with your edits applied, so the preview is what gets downloaded."""
     source = st.session_state.get("resume_source")
@@ -498,9 +518,29 @@ def _render_preview(data: dict) -> None:
         st.info("Upload a resume to see it here.")
         return
     new_bytes, failed, unsupported = result
+    template = _template_pdf(data) if source["filename"].lower().endswith(".pdf") else None
+    if template:
+        pages = render_pdf_pages(template)
+        with st.container(key="preview_page", height=820 if len(pages) > 1 else "content"):
+            for png in pages:
+                st.image(png, use_container_width=True)
+        st.caption("Preview built from the resume template, so it includes every change.")
+        _show_edit_notes(failed, unsupported)
+        return
+    if failed or unsupported:
+        # The preview must match the download: a generated resume that includes every change.
+        new_bytes = build_pdf(data, st.session_state.get("template_choice", "Classic"))
+        pages = render_pdf_pages(new_bytes)
+        with st.container(key="preview_page", height=820 if len(pages) > 1 else "content"):
+            for png in pages:
+                st.image(png, use_container_width=True)
+        st.caption("Your original file cannot hold every change, so the preview shows the generated resume that "
+                   "the download uses.")
+        _show_edit_notes(failed, unsupported)
+        return
     if source["filename"].lower().endswith(".pdf"):
         pages = render_pdf_pages(new_bytes)
-        with st.container(key="preview_page", height=820 if len(pages) > 1 else None):
+        with st.container(key="preview_page", height=820 if len(pages) > 1 else "content"):
             for png in pages:
                 st.image(png, use_container_width=True)
     else:
@@ -513,7 +553,7 @@ def _render_preview(data: dict) -> None:
             body = "".join(f"<p>{html.escape(line)}</p>" for line in lines)
             st.html(f'<div class="hs-a4" style="font-size:11px;padding:24px;overflow:auto">{body}</div>')
         else:
-            with st.container(key="preview_page", height=820 if len(pages) > 1 else None):
+            with st.container(key="preview_page", height=820 if len(pages) > 1 else "content"):
                 for png in pages:
                     st.image(png, use_container_width=True)
     _show_edit_notes(failed, unsupported)
@@ -529,7 +569,11 @@ def _show_edit_notes(failed: list[str], unsupported: list[str]) -> None:
 
 
 def _download_menu(data: dict) -> None:
-    """One download button in the format the user uploaded: PDF stays PDF, Word stays Word."""
+    """One download button in the format the user uploaded: PDF stays PDF, Word stays Word.
+
+    When the uploaded file cannot hold every change (for example a new school or skill that has no room),
+    the download is a resume generated from the editor data, so nothing you added is left out.
+    """
     source = st.session_state.get("resume_source")
     result = _edited_document(data)
     if not source or result is None:
@@ -538,7 +582,16 @@ def _download_menu(data: dict) -> None:
     stem = source["filename"].rsplit(".", 1)[0]
     mime = ("application/pdf" if extension == "pdf"
             else "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    st.download_button(f"Download {extension.upper()}", data=result[0], file_name=f"{stem}.{extension}",
+    file_bytes, failed, unsupported = result
+    template = _template_pdf(data) if extension == "pdf" else None
+    if template:
+        file_bytes = template
+    elif failed or unsupported:
+        template = st.session_state.get("template_choice", "Classic")
+        file_bytes = build_pdf(data, template) if extension == "pdf" else build_docx(data, template)
+        st.caption("Your original file cannot hold every change, so this download is generated from the editor "
+                   "and includes all of them.")
+    st.download_button(f"Download {extension.upper()}", data=file_bytes, file_name=f"{stem}.{extension}",
                        mime=mime, key="dl_edited", use_container_width=True)
 
 

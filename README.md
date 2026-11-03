@@ -42,6 +42,16 @@ python -m pytest -q -p no:cacheprovider
 
 The tests use temporary databases and need no internet access. Run them one at a time. Running several test processes at once can stall on macOS file access to the Desktop folder.
 
+## Optional: Gemini suggestions
+
+Add a Gemini API key to `.env` to get extra wording suggestions for experience and project bullets:
+
+```
+GEMINI_API_KEY=your-key-here
+```
+
+Without a key, the app uses only its rule-based suggestions. When this step runs, resume bullets are sent to Google. Each rewrite is checked so it cannot add a skill, number, or name that is not already in the bullet or the job description.
+
 ## Settings (optional, in `.env`)
 
 Copy `.env.example` to `.env` to change the database location or the upload limit. Leave it out to use the defaults.

@@ -122,22 +122,25 @@ def test_editing_summary_updates_resume_data(temp_db, make_docx, sample_text, sa
     assert not _errors(at)
 
 
-def test_applying_a_suggestion_changes_only_the_target_bullet(temp_db, make_docx, sample_text, sample_jd):
+def test_applying_a_suggestion_adds_only_the_missing_skill(temp_db, make_docx, sample_text, sample_jd):
+    from hiresense.jd_parser import extract_requirements
     at = _app().run()
     next(b for b in at.button if b.label == "Start free trial").click().run()
     resume = _workspace(at, sample_text, sample_jd, make_docx)
     at.run()
-    at.session_state["suggestions"] = generate_suggestions(resume)
+    requirements = extract_requirements(sample_jd)
+    at.session_state["suggestions"] = generate_suggestions(resume, requirements)
     at.session_state["suggestion_status"] = {}
     at.session_state["main_view"] = "Suggestions"
     at.run()
-    weak = next(s for s in at.session_state["suggestions"] if s["kind"] == "weak_opener")
+    gap = next(s for s in at.session_state["suggestions"] if s["kind"] == "keyword_gap")
     before = [b["text"] for b in resume["experience"][0]["bullets"]]
-    at.button(key=f"accept:{weak['id']}").click().run()
+    at.button(key=f"accept:{gap['id']}").click().run()
     assert not _errors(at)
     after = [b["text"] for b in at.session_state["resume_data"]["experience"][0]["bullets"]]
-    assert after[0] != before[0] and after[1:] == before[1:]
-    assert at.session_state["suggestion_status"][weak["id"]] == "accepted"
+    assert after == before
+    assert gap["proposed"] in [skill["name"] for skill in at.session_state["resume_data"]["skills"]]
+    assert at.session_state["suggestion_status"][gap["id"]] == "accepted"
 
 
 def test_student_sees_only_own_recent_matches(temp_db, make_docx, sample_text):

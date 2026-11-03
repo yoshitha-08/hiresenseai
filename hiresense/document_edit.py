@@ -221,6 +221,19 @@ def _widen_if_line_is_free(page: pymupdf.Page, box: pymupdf.Rect) -> pymupdf.Rec
     return pymupdf.Rect(box.x0, box.y0, max(box.x1, right_margin), box.y1)
 
 
+def _fits(box: pymupdf.Rect, width: float, height: float, text: str, fontname: str, size: float) -> bool:
+    """Test on a scratch page whether text fits in the box at this size, without touching the real page."""
+    scratch = pymupdf.open()
+    try:
+        test_page = scratch.new_page(width=width, height=height)
+        return test_page.insert_textbox(box, text, fontname=fontname, fontsize=size, color=(0, 0, 0), align=0) >= 0
+    finally:
+        scratch.close()
+
+
+MAX_EXTRA_LINES = 3
+
+
 def _replace_on_page(page: pymupdf.Page, old: str, new: str) -> bool:
     tokens = old.split()
     if not tokens:
@@ -235,22 +248,107 @@ def _replace_on_page(page: pymupdf.Page, old: str, new: str) -> bool:
     fontname, fontsize = _font_for(page, box)
     box = _widen_if_line_is_free(page, box)
 
+    text = new.strip()
+    if not text:
+        for rect in rects:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions()
+        return True
+
+    # Decide the placement before removing anything, so a failed fit leaves the original text in place.
+    # If the text does not fit on its line, let it wrap into the empty space directly below, as long as no
+    # other text is there.
+    # Keep the original font size. The text may wrap onto free space directly below its line; if it still does
+    # not fit, nothing is changed and the caller reports it.
+    found = None
+    for extra_lines in range(0, MAX_EXTRA_LINES + 1):
+        candidate = pymupdf.Rect(box.x0, box.y0, box.x1, box.y1 + extra_lines * box.height)
+        if extra_lines and not _space_is_free(page, candidate, rects):
+            break
+        if _fits(candidate, page.rect.width, page.rect.height, text, fontname, fontsize):
+            found = (candidate, fontsize)
+            break
+    if found is None:
+        return _place_by_shifting_below(page, box, rects, text, fontname, fontsize)
+    target, size = found
+
     for rect in rects:
         page.add_redact_annot(rect, fill=(1, 1, 1))
     page.apply_redactions()
+    page.insert_textbox(target, text, fontname=fontname, fontsize=size, color=(0, 0, 0), align=0)
+    return True
 
-    text = new.strip()
-    if not text:
-        return True
-    size = fontsize
-    while size >= MIN_FONT_SIZE:
-        result = page.insert_textbox(box, text, fontname=fontname, fontsize=size, color=(0, 0, 0), align=0)
-        if result >= 0:
-            return True
-        size -= 0.25
-    # Could not fit at the smallest size: put the text back so nothing is lost.
-    page.insert_textbox(box, old, fontname=fontname, fontsize=MIN_FONT_SIZE, color=(0, 0, 0), align=0)
-    return False
+
+def _base_font(font_name: str, flags: int) -> str:
+    serif = bool(flags & 4) or "Times" in font_name or "Serif" in font_name
+    bold = bool(flags & 16) or "Bold" in font_name
+    if serif:
+        return "tibo" if bold else "tiro"
+    return "hebo" if bold else "helv"
+
+
+def _place_by_shifting_below(page: pymupdf.Page, box: pymupdf.Rect, rects, text: str, fontname: str,
+                             fontsize: float) -> bool:
+    """Make room for longer text by moving everything below it down, copying the page so that text keeps
+    its exact font, spacing and bullets.
+
+    Only done when the line has nothing else on it and the moved content still fits above the bottom margin.
+    """
+    line_height = box.height
+    needed = None
+    for extra in range(1, MAX_EXTRA_LINES + 1):
+        candidate = pymupdf.Rect(box.x0, box.y0, box.x1, box.y1 + extra * line_height)
+        if _fits(candidate, page.rect.width, page.rect.height, text, fontname, fontsize):
+            needed = extra
+            break
+    if needed is None:
+        return False
+    delta = needed * line_height
+
+    # Anything else on the same visual line (for example a right-aligned date) would be lost, so do not shift.
+    for word in page.get_text("words"):
+        word_box = pymupdf.Rect(word[:4])
+        if word_box.y0 < box.y1 - 1 and word_box.y1 > box.y0 + 1 and not any(word_box.intersects(r) for r in rects):
+            return False
+    lowest = max((pymupdf.Rect(w[:4]).y1 for w in page.get_text("words")), default=box.y1)
+    if lowest + delta > page.rect.y1 - 20:
+        return False
+
+    document = page.parent
+    width, height = page.rect.width, page.rect.height
+    source = pymupdf.open(stream=document.tobytes(), filetype="pdf")
+    try:
+        index = page.number
+        new_page = document.new_page(width=width, height=height)
+        new_page.show_pdf_page(pymupdf.Rect(0, 0, width, box.y0), source, index,
+                               clip=pymupdf.Rect(0, 0, width, box.y0))
+        lower_top = box.y1 + 2  # below the old line's descenders, so none of its letters are copied
+        new_page.show_pdf_page(pymupdf.Rect(0, lower_top + delta, width, height), source, index,
+                               clip=pymupdf.Rect(0, lower_top, width, height - delta))
+        for link in source[index].get_links():
+            if link.get("kind") != pymupdf.LINK_URI:
+                continue
+            area = pymupdf.Rect(link["from"])
+            if area.y1 <= box.y0 + 1:
+                new_page.insert_link({"kind": pymupdf.LINK_URI, "from": area, "uri": link["uri"]})
+            elif area.y0 >= box.y1 - 1:
+                moved = pymupdf.Rect(area.x0, area.y0 + delta, area.x1, area.y1 + delta)  # moved with its text
+                new_page.insert_link({"kind": pymupdf.LINK_URI, "from": moved, "uri": link["uri"]})
+        candidate = pymupdf.Rect(box.x0, box.y0, box.x1, box.y1 + needed * line_height)
+        new_page.insert_textbox(candidate, text, fontname=fontname, fontsize=fontsize, color=(0, 0, 0), align=0)
+        document.delete_page(index)
+    finally:
+        source.close()
+    return True
+
+
+def _space_is_free(page: pymupdf.Page, area: pymupdf.Rect, ignore: list[pymupdf.Rect]) -> bool:
+    """True when no text other than the words being replaced sits inside this area."""
+    for word in page.get_text("words"):
+        word_box = pymupdf.Rect(word[:4])
+        if word_box.intersects(area) and not any(word_box.intersects(rect) for rect in ignore):
+            return False
+    return True
 
 
 def _apply_pdf(file_bytes: bytes, ops: list[dict], unsupported: list[str]) -> tuple[bytes, list[str], list[str]]:
@@ -262,8 +360,8 @@ def _apply_pdf(file_bytes: bytes, ops: list[dict], unsupported: list[str]) -> tu
                 failed.append(op.get("old", "")[:80])
                 continue
             done = False
-            for page in document:
-                if _replace_on_page(page, op["old"], op["new"]):
+            for index in range(len(document)):
+                if _replace_on_page(document[index], op["old"], op["new"]):
                     done = True
                     break
             if not done:
