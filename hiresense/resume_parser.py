@@ -113,7 +113,14 @@ def _page_lines(page) -> str:
             parts.append(" | " if gap > 40 else " ")
             parts.append(current[2])
         lines.append("".join(parts))
-    return "\n".join(lines)
+    # A bullet glyph on its own line belongs to the text on the next line.
+    joined = []
+    for line in lines:
+        if joined and joined[-1].strip() in BULLET_GLYPHS:
+            joined[-1] = f"{joined[-1].strip()} {line.strip()}"
+        else:
+            joined.append(line)
+    return "\n".join(joined)
 
 
 def _extract_docx(data: bytes) -> str:
@@ -409,6 +416,7 @@ def _parse_links(lines):
     return links
 
 
+BULLET_GLYPHS = {"•", "●", "▪", "·", "-", "*"}
 HEADER_LINK_LABELS = ("GitHub", "LeetCode", "LinkedIn", "Portfolio", "Website")
 
 
@@ -450,4 +458,7 @@ def parse_upload(filename: str, data: bytes) -> dict:
             # The icon text in the header is replaced by the real links, so it is not shown twice.
             resume["unclassified"] = [item for item in resume.get("unclassified", [])
                                       if not any(label in item.get("text", "") for label in HEADER_LINK_LABELS)]
+        # Icon-font fragments such as "§ | ï" carry no words, so they are not kept.
+        resume["unclassified"] = [item for item in resume.get("unclassified", [])
+                                  if re.search(r"[A-Za-z0-9]{2,}", item.get("text", ""))]
     return resume

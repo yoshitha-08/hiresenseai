@@ -98,7 +98,6 @@ def build_latex(data: dict) -> str:
         ("certifications", "Certifications", lambda: _entries(data, "certifications")),
         ("achievements", "Achievements", lambda: _items(data, "achievements")),
         ("interests", "Interests", lambda: _items(data, "interests")),
-        ("unclassified", "Additional Content", lambda: _items(data, "unclassified")),
     ]
     for key, title, body in sections:
         if not _visible(data, key):
