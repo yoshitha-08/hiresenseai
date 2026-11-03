@@ -13,7 +13,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 DB_PATH = Path(os.getenv("HIRESENSE_DB_PATH", str(ROOT_DIR / "data" / "hiresense.sqlite3")))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-LLM_MODEL = os.getenv("HIRESENSE_LLM_MODEL", "gemini-3.1-pro-preview")
+LLM_MODEL = os.getenv("HIRESENSE_LLM_MODEL", "gemini-3.6-flash")
 if LLM_MODEL.lower() in {"", "off", "none"}:
     LLM_MODEL = ""
 MAX_UPLOAD_MB = float(os.getenv("HIRESENSE_MAX_UPLOAD_MB", "5"))
