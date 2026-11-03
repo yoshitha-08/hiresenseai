@@ -15,10 +15,10 @@ ENTRY_SECTIONS = ("experience", "internships", "education", "projects", "certifi
 ENTRY_FIELDS = ("title", "organization", "dates", "location", "link", "field_of_study", "grade")
 ENTRY_DEFAULTS = {"location": "", "link": "", "field_of_study": "", "grade": ""}
 # Sections made of simple items.
-ITEM_SECTIONS = ("achievements", "interests", "unclassified")
+ITEM_SECTIONS = ("achievements", "leadership", "interests", "unclassified")
 SECTION_ORDER = (
     "summary", "experience", "internships", "education", "skills", "projects",
-    "certifications", "achievements", "interests", "links", "unclassified",
+    "certifications", "achievements", "leadership", "interests", "links", "unclassified",
 )
 PERSONAL_FIELDS = ("name", "role", "email", "phone", "location")
 SECTION_TITLES = {
@@ -30,6 +30,7 @@ SECTION_TITLES = {
     "projects": "Projects",
     "certifications": "Certifications",
     "achievements": "Achievements",
+    "leadership": "Leadership & Responsibilities",
     "interests": "Interests",
     "links": "Professional Links",
     "unclassified": "Additional Content",

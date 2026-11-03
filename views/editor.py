@@ -37,6 +37,7 @@ SECTION_NAV = [
     ("certifications", "Certifications"),
     ("interests", "Interests"),
     ("achievements", "Achievements"),
+    ("leadership", "Leadership & Responsibilities"),
 ]
 NAV_KEYS = [key for key, _ in SECTION_NAV]
 NAV_LABEL = dict(SECTION_NAV)

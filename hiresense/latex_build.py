@@ -97,6 +97,7 @@ def build_latex(data: dict) -> str:
         ("projects", "Projects", lambda: _entries(data, "projects")),
         ("certifications", "Certifications", lambda: _entries(data, "certifications")),
         ("achievements", "Achievements", lambda: _items(data, "achievements")),
+        ("leadership", "Leadership \\& Responsibilities", lambda: _items(data, "leadership")),
         ("interests", "Interests", lambda: _items(data, "interests")),
     ]
     for key, title, body in sections:

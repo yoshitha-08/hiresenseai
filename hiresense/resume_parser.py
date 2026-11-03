@@ -36,8 +36,10 @@ SECTION_ALIASES = {
     "projects": ["projects", "academic projects", "personal projects", "key projects"],
     "certifications": ["certifications", "certificates", "licenses", "licenses and certifications", "courses"],
     "achievements": ["achievements", "awards", "honors", "honours", "accomplishments", "awards and achievements",
-                     "leadership & responsibilities", "leadership and responsibilities", "leadership",
-                     "responsibilities", "positions of responsibility", "extracurricular activities"],
+                     ],
+    "leadership": ["leadership & responsibilities", "leadership and responsibilities", "leadership",
+                   "responsibilities", "positions of responsibility", "extracurricular activities",
+                   "extracurricular"],
     "interests": ["interests", "hobbies", "hobbies and interests", "activities"],
     "links": ["links", "profiles", "online profiles", "professional links", "social links"],
 }
@@ -200,9 +202,9 @@ def parse_resume_text(text: str) -> dict:
         data["skills"] = _parse_skills(buckets.pop("skills"))
     if "links" in buckets:
         data["links"] = _parse_links(buckets.pop("links"))
-    for section in ("achievements", "interests"):
+    for section in ("achievements", "leadership", "interests"):
         if section in buckets:
-            data[section] = [{"id": new_id(), "text": _strip_bullet(line)} for line in buckets.pop(section)]
+            data[section] = [{"id": new_id(), "text": text} for text in _join_wrapped_lines(buckets.pop(section))]
 
     leftovers = []
     for key, value in buckets.items():
