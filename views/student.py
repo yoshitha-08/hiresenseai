@@ -12,6 +12,7 @@ from hiresense.matching_engine import analyze_match
 from hiresense.resume_parser import ResumeParseError, parse_upload
 from hiresense.security import clean_text, validate_email, validate_new_password
 from hiresense.suggestion_engine import generate_suggestions
+from hiresense.llm_match import evidence_with_gemini, requirements_with_gemini
 
 from views.common import STAGE_LABELS, esc, stage_list_html
 from views.editor import render_editor, reset_editor_state
@@ -326,12 +327,17 @@ def _stage_read_resume() -> None:
 
 
 def _stage_read_jd() -> None:
-    st.session_state["jd_requirements"] = extract_requirements(st.session_state["jd"]["text"])
+    text = st.session_state["jd"]["text"]
+    requirements, used_gemini = requirements_with_gemini(extract_requirements(text), text)
+    st.session_state["jd_requirements"] = requirements
+    st.session_state["gemini_used"] = used_gemini
 
 
 def _stage_score() -> None:
     jd = st.session_state["jd"]
-    result = analyze_match(st.session_state["resume_data"], jd["text"])
+    requirements = st.session_state.get("jd_requirements") or extract_requirements(jd["text"])
+    evidence, _ = evidence_with_gemini(st.session_state["resume_data"], requirements)
+    result = analyze_match(st.session_state["resume_data"], jd["text"], requirements=requirements, evidence=evidence)
     st.session_state["match_current"] = result
     st.session_state["match_comparison"] = None
     source = st.session_state["resume_source"]

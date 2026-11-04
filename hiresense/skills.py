@@ -26,6 +26,8 @@ SKILL_ALIASES: dict[str, list[str]] = {
     "Computer Vision": [],
     "Artificial Intelligence": ["ai"],
     "Generative AI": ["genai", "gen ai"],
+    "Retrieval-Augmented Generation": ["RAG", "retrieval augmented generation", "retrieval-augmented generation"],
+    "Large Language Models": ["LLM", "LLMs", "large language model"],
     "TensorFlow": [],
     "PyTorch": [],
     "Scikit-learn": ["sklearn", "scikit learn"],

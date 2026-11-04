@@ -68,16 +68,30 @@ def _jd_term_strength(term: str, blocks: list[dict]) -> tuple[str, list[str]]:
     return best, where
 
 
-def analyze_match(resume_data: dict, jd_text: str, weights: dict | None = None) -> dict:
-    """Score a resume against a JD. Pure function: identical inputs always give identical output."""
+def analyze_match(resume_data: dict, jd_text: str, weights: dict | None = None, requirements: dict | None = None,
+                  evidence: dict | None = None) -> dict:
+    """Score a resume against a JD. Same inputs always give the same output.
+
+    requirements: optional, from the job description (rules, or rules plus verified Gemini skills).
+    evidence: optional, {skill: (section, quote)} from Gemini. Used only to raise a skill's strength.
+    """
     weights = dict(DEFAULT_WEIGHTS if weights is None else weights)
-    requirements = extract_requirements(jd_text)
+    requirements = requirements or extract_requirements(jd_text)
+    evidence = evidence or {}
     blocks = sections_text(resume_data)
     full_text = " \n ".join(block["text"] for block in blocks)
 
     term_results = {}
     for term in sorted(set(requirements["required"]) | set(requirements["preferred"])):
         strength, where = _jd_term_strength(term, blocks)
+        if term in evidence:
+            section, _quote = evidence[term]
+            judged = _strength_for_section(section)
+            label = SECTION_TITLES.get(section, section)
+            if STRENGTH_RANK[judged] > STRENGTH_RANK[strength]:
+                strength = judged
+            if label not in where:
+                where = where + [label]
         term_results[term] = {"strength": strength, "sections": where}
 
     def category_ratio(terms):
@@ -193,6 +207,7 @@ def analyze_match(resume_data: dict, jd_text: str, weights: dict | None = None) 
                  "shortlisting, interviews, or employment.")
 
     return {
+        "engine": "rules + Gemini evidence" if evidence else "rules",
         "score": score,
         "insufficient_signal": not applicable,
         "weights": weights,
